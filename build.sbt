@@ -155,7 +155,10 @@ lazy val core = (project in file("modules/core"))
       Deps.config,
       Deps.hikariCP,
       Deps.awsS3,
-      Deps.awsSts
+      Deps.awsSts,
+      "com.dimafeng" %% "testcontainers-scala-scalatest" % "0.41.8" % Test,
+      "com.dimafeng" %% "testcontainers-scala-postgresql" % "0.41.8" % Test,
+      "org.postgresql" % "postgresql" % "42.7.3" % Test
     )
   )
 
