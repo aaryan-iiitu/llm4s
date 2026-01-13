@@ -5,10 +5,12 @@ import org.scalatest.BeforeAndAfterAll
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.testcontainers.utility.DockerImageName
+import org.testcontainers.DockerClientFactory
 
 import java.util.UUID
+import scala.util.Try
 
-class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
+class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll with org.scalatest.Assertions {
 
   private lazy val container: PostgreSQLContainer =
     PostgreSQLContainer(
@@ -16,12 +18,17 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
     )
 
   override def beforeAll(): Unit = {
+    val isDockerAvailable = Try(DockerClientFactory.instance().isDockerAvailable).getOrElse(false)
+    assume(isDockerAvailable, "Docker is not available. Skipping integration tests.")
     super.beforeAll()
     container.start()
   }
 
   override def afterAll(): Unit = {
-    container.stop()
+    val isDockerAvailable = Try(DockerClientFactory.instance().isDockerAvailable).getOrElse(false)
+    if (isDockerAvailable) {
+      container.stop()
+    }
     super.afterAll()
   }
 
