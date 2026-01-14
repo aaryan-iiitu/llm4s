@@ -20,7 +20,7 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
   private val isEnabled = sys.env.get("POSTGRES_TEST_ENABLED").exists(_.toBoolean)
 
   private var store: PostgresMemoryStore = _
-  private val tableName = s"test_memories_${System.currentTimeMillis()}"
+  private val tableName                  = s"test_memories_${System.currentTimeMillis()}"
 
   // 2. Config: Use Env Vars or Defaults (Localhost)
   private val dbConfig = PostgresMemoryStore.Config(
@@ -33,27 +33,24 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
     maxPoolSize = 4
   )
 
-  override def beforeEach(): Unit = {
+  override def beforeEach(): Unit =
     if (isEnabled) {
       store = PostgresMemoryStore(dbConfig).fold(
         e => fail(s"Failed to connect to Postgres: ${e.message}"),
         identity
       )
     }
-  }
 
-  override def afterEach(): Unit = {
+  override def afterEach(): Unit =
     if (store != null) {
       Try(store.clear())
       store.close()
     }
-  }
 
   // 3. Helper to skip tests
-  private def skipIfDisabled(testBody: => Unit): Unit = {
+  private def skipIfDisabled(testBody: => Unit): Unit =
     if (isEnabled) testBody
     else info("Skipping Postgres test (POSTGRES_TEST_ENABLED=true not set)")
-  }
 
   it should "store and retrieve a conversation memory" in skipIfDisabled {
     val id = MemoryId(UUID.randomUUID().toString)
@@ -80,7 +77,7 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
 
     // Create a NEW connection (store2) to verify data is actually in the DB
     val store2 = PostgresMemoryStore(dbConfig).fold(e => fail(e.message), identity)
-    
+
     val result = store2.get(id)
     result.toOption.flatten.map(_.content) shouldBe Some("Persistence Check")
     store2.close()
