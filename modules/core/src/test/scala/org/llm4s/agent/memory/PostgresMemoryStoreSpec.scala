@@ -1,57 +1,62 @@
 package org.llm4s.agent.memory
 
-import com.dimafeng.testcontainers.PostgreSQLContainer
-import org.scalatest.BeforeAndAfterAll
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import org.testcontainers.utility.DockerImageName
-import org.testcontainers.DockerClientFactory
-
+import org.scalatest.BeforeAndAfterEach
 import java.util.UUID
 import scala.util.Try
 
-class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
+/**
+ * Integration Tests for PostgresMemoryStore.
+ * ENV VAR TOGGLE PATTERN:
+ * These tests are skipped by default in CI to avoid dependency issues.
+ * To run them locally:
+ * 1. Start Postgres: docker run --rm -p 5432:5432 -e POSTGRES_PASSWORD=password pgvector/pgvector:pg16
+ * 2. Enable Tests: export POSTGRES_TEST_ENABLED=true
+ */
+class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
-  private lazy val container: PostgreSQLContainer =
-    PostgreSQLContainer(
-      dockerImageNameOverride = DockerImageName.parse("pgvector/pgvector:pg16")
-    )
+  // 1. Env Var Check
+  private val isEnabled = sys.env.get("POSTGRES_TEST_ENABLED").exists(_.toBoolean)
 
-  override def beforeAll(): Unit = {
-    val isDockerAvailable = Try(DockerClientFactory.instance().isDockerAvailable).getOrElse(false)
-    assume(isDockerAvailable, "Docker is not available. Skipping integration tests.")
-    super.beforeAll()
-    container.start()
-  }
+  private var store: PostgresMemoryStore = _
+  private val tableName = s"test_memories_${System.currentTimeMillis()}"
 
-  override def afterAll(): Unit = {
-    if (Try(DockerClientFactory.instance().isDockerAvailable).getOrElse(false)) {
-      container.stop()
+  // 2. Config: Use Env Vars or Defaults (Localhost)
+  private val dbConfig = PostgresMemoryStore.Config(
+    host = sys.env.getOrElse("POSTGRES_HOST", "localhost"),
+    port = sys.env.getOrElse("POSTGRES_PORT", "5432").toInt,
+    database = sys.env.getOrElse("POSTGRES_DB", "postgres"),
+    user = sys.env.getOrElse("POSTGRES_USER", "postgres"),
+    password = sys.env.getOrElse("POSTGRES_PASSWORD", "password"),
+    tableName = tableName,
+    maxPoolSize = 4
+  )
+
+  override def beforeEach(): Unit = {
+    if (isEnabled) {
+      store = PostgresMemoryStore(dbConfig).fold(
+        e => fail(s"Failed to connect to Postgres: ${e.message}"),
+        identity
+      )
     }
-    super.afterAll()
   }
 
-  private def createStore(table: String): PostgresMemoryStore = {
-    val config = PostgresMemoryStore.Config(
-      host = container.host,
-      port = container.mappedPort(5432),
-      database = container.databaseName,
-      user = container.username,
-      password = container.password,
-      tableName = table,
-      maxPoolSize = 4
-    )
-
-    PostgresMemoryStore(config).fold(
-      err => fail(err.message),
-      identity
-    )
+  override def afterEach(): Unit = {
+    if (store != null) {
+      Try(store.clear())
+      store.close()
+    }
   }
 
-  it should "store and retrieve a conversation memory" in {
-    val store = createStore("agent_memories")
-    val id    = MemoryId(UUID.randomUUID().toString)
+  // 3. Helper to skip tests
+  private def skipIfDisabled(testBody: => Unit): Unit = {
+    if (isEnabled) testBody
+    else info("Skipping Postgres test (POSTGRES_TEST_ENABLED=true not set)")
+  }
 
+  it should "store and retrieve a conversation memory" in skipIfDisabled {
+    val id = MemoryId(UUID.randomUUID().toString)
     val memory = Memory(
       id = id,
       content = "Hello, I am a test memory",
@@ -64,21 +69,20 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
     val retrieved = store.get(id).toOption.flatten
     retrieved shouldBe defined
     retrieved.get.content shouldBe "Hello, I am a test memory"
-    retrieved.get.metadata("conversation_id") shouldBe "conv-1"
-
-    store.close()
+    retrieved.get.metadata.get("conversation_id") shouldBe Some("conv-1")
   }
 
-  it should "persist data across store instances" in {
-    val table = "persistent_memories"
-    val id    = MemoryId(UUID.randomUUID().toString)
+  it should "persist data across store instances" in skipIfDisabled {
+    val id = MemoryId(UUID.randomUUID().toString)
+    store.store(Memory(id, "Persistence Check", MemoryType.Task)).isRight shouldBe true
 
-    val store1 = createStore(table)
-    store1.store(Memory(id, "Persistence Check", MemoryType.Task)).isRight shouldBe true
-    store1.close()
+    store.close()
 
-    val store2 = createStore(table)
-    store2.get(id).toOption.flatten.map(_.content) shouldBe Some("Persistence Check")
+    // Create a NEW connection (store2) to verify data is actually in the DB
+    val store2 = PostgresMemoryStore(dbConfig).fold(e => fail(e.message), identity)
+    
+    val result = store2.get(id)
+    result.toOption.flatten.map(_.content) shouldBe Some("Persistence Check")
     store2.close()
   }
 }
